@@ -1,8 +1,13 @@
 {
   "name": "workingtree-ftp-uploader",
   "version": "0.1.0",
-  "description": "CLI global untuk upload file working tree Git ke FTP berdasarkan profile per project.",
+  "description": "Node.js CLI for uploading Git working tree changes to FTP or FTPS per project.",
   "type": "module",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
     "wftp": "./src/cli.js"
   },
@@ -14,10 +19,20 @@
     "ftp",
     "git",
     "cli",
-    "deploy"
+    "deploy",
+    "ftps",
+    "working-tree"
   ],
-  "author": "",
+  "author": "soifant",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/soifant/workingtree-ftp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/soifant/workingtree-ftp/issues"
+  },
+  "homepage": "https://github.com/soifant/workingtree-ftp#readme",
   "engines": {
     "node": ">=20"
   },

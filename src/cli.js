@@ -6,7 +6,6 @@ import path from "node:path";
 import {
   ensureGitignoreEntry,
   getGlobalProfilesPath,
-  getLocalConfigPath,
   maskProfile,
   readGlobalProfiles,
   readLocalConfig,
@@ -14,9 +13,15 @@ import {
   upsertGlobalProfile,
   writeLocalConfig
 } from "./config.js";
-import { executeTransferPlan } from "./ftp.js";
+import { downloadAllFiles, downloadSingleFile, executeTransferPlan } from "./ftp.js";
 import { findGitRoot, readWorkingTreeChanges } from "./git.js";
 import { buildTransferPlan } from "./planner.js";
+import { createReport } from "./report.js";
+import {
+  buildSingleDeletePlan,
+  buildSingleDownloadTarget,
+  buildSingleUploadPlan
+} from "./single-target.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json");
@@ -64,6 +69,16 @@ function printPlan(plan) {
   }
 }
 
+function printDownloadTarget(target) {
+  process.stdout.write("Downloads: 1\n");
+  process.stdout.write(`  download ${target.relativePath}\n`);
+}
+
+function printDownloadAll(repoRoot, remoteRoot) {
+  process.stdout.write("Downloads: all\n");
+  process.stdout.write(`  download-all ${remoteRoot} -> ${repoRoot}\n`);
+}
+
 async function loadProjectContext(startDir) {
   const repoRoot = await findGitRoot(startDir);
   const localConfig = await readLocalConfig(repoRoot);
@@ -99,9 +114,15 @@ async function loadPlan(options) {
   };
 }
 
+function printProjectContext(result) {
+  process.stdout.write(`Repo: ${result.repoRoot}\n`);
+  process.stdout.write(`Profile: ${result.localConfig.profile}\n`);
+  process.stdout.write(`Remote root: ${result.localConfig.remoteRoot}\n`);
+}
+
 program
   .name("wftp")
-  .description("Upload file working tree Git yang belum di-commit ke FTP.")
+  .description("Push working tree Git, transfer file tunggal via FTP, dan buat report perubahan Git.")
   .version(version);
 
 const profile = program.command("profile").description("Kelola profile FTP global.");
@@ -236,15 +257,13 @@ program
 
 program
   .command("status")
-  .description("Lihat file working tree yang akan diproses.")
+  .description("Lihat file working tree yang akan diproses oleh command push.")
   .option("--delete-removed", "Masukkan file deleted/renamed lama untuk dihapus di remote")
   .option("--no-include-untracked", "Jangan upload file untracked")
   .action(
     wrap(async (options) => {
       const result = await loadPlan(options);
-      process.stdout.write(`Repo: ${result.repoRoot}\n`);
-      process.stdout.write(`Profile: ${result.localConfig.profile}\n`);
-      process.stdout.write(`Remote root: ${result.localConfig.remoteRoot}\n`);
+      printProjectContext(result);
       process.stdout.write(`Changes detected: ${result.changes.length}\n`);
       printPlan(result.plan);
 
@@ -255,23 +274,25 @@ program
   );
 
 program
-  .command("upload")
-  .description("Upload perubahan working tree ke FTP.")
+  .command("push")
+  .description("Push perubahan working tree ke FTP.")
   .option("--dry-run", "Hanya tampilkan aksi tanpa upload")
   .option("--delete-removed", "Hapus file remote untuk file lokal yang deleted atau renamed")
+  .option(
+    "--delete-same-file",
+    "Jika overwrite upload gagal karena file remote yang sama, hapus file remote lalu coba upload ulang"
+  )
   .option("--no-include-untracked", "Jangan upload file untracked")
   .option("--verbose", "Tampilkan output detail proses FTP")
   .action(
     wrap(async (options) => {
       const result = await loadPlan(options);
 
-      process.stdout.write(`Repo: ${result.repoRoot}\n`);
-      process.stdout.write(`Profile: ${result.localConfig.profile}\n`);
-      process.stdout.write(`Remote root: ${result.localConfig.remoteRoot}\n`);
+      printProjectContext(result);
       printPlan(result.plan);
 
       if (result.plan.conflicts.length > 0) {
-        throw new Error("Working tree memiliki conflict. Selesaikan conflict sebelum upload.");
+        throw new Error("Working tree memiliki conflict. Selesaikan conflict sebelum push.");
       }
 
       if (result.plan.uploads.length === 0 && result.plan.deletions.length === 0) {
@@ -285,9 +306,144 @@ program
       }
 
       await executeTransferPlan(result.plan, result.localConfig, result.profile, {
+        deleteSameFile: Boolean(options.deleteSameFile),
+        verbose: Boolean(options.verbose)
+      });
+      process.stdout.write("Push selesai.\n");
+    })
+  );
+
+program
+  .command("upload")
+  .description("Upload satu file ke FTP.")
+  .argument("<path>", "Path file yang akan diupload")
+  .option("--dry-run", "Hanya tampilkan aksi tanpa upload")
+  .option(
+    "--delete-same-file",
+    "Jika overwrite upload gagal karena file remote yang sama, hapus file remote lalu coba upload ulang"
+  )
+  .option("--verbose", "Tampilkan output detail proses FTP")
+  .action(
+    wrap(async (filePath, options) => {
+      const context = await loadProjectContext(process.cwd());
+      const plan = await buildSingleUploadPlan(context.repoRoot, filePath, process.cwd());
+      const result = {
+        ...context,
+        plan
+      };
+
+      printProjectContext(result);
+      printPlan(result.plan);
+
+      if (options.dryRun) {
+        process.stdout.write("Dry run selesai. Tidak ada koneksi FTP yang dilakukan.\n");
+        return;
+      }
+
+      await executeTransferPlan(result.plan, result.localConfig, result.profile, {
+        deleteSameFile: Boolean(options.deleteSameFile),
         verbose: Boolean(options.verbose)
       });
       process.stdout.write("Upload selesai.\n");
+    })
+  );
+
+program
+  .command("delete")
+  .description("Hapus satu file remote dari FTP.")
+  .argument("<path>", "Path file yang akan dihapus di remote")
+  .option("--dry-run", "Hanya tampilkan aksi tanpa delete remote")
+  .action(
+    wrap(async (filePath, options) => {
+      const context = await loadProjectContext(process.cwd());
+      const plan = buildSingleDeletePlan(context.repoRoot, filePath, process.cwd());
+      const result = {
+        ...context,
+        plan
+      };
+
+      printProjectContext(result);
+      printPlan(result.plan);
+
+      if (options.dryRun) {
+        process.stdout.write("Dry run selesai. Tidak ada koneksi FTP yang dilakukan.\n");
+        return;
+      }
+
+      await executeTransferPlan(result.plan, result.localConfig, result.profile, {});
+      process.stdout.write("Delete selesai.\n");
+    })
+  );
+
+program
+  .command("download")
+  .description("Download satu file atau seluruh remote root dari FTP.")
+  .argument("[path]", "Path file yang akan didownload")
+  .option("--all", "Download seluruh isi remote root ke root repository lokal")
+  .option("--dry-run", "Hanya tampilkan aksi tanpa download")
+  .option("--verbose", "Tampilkan output detail proses FTP")
+  .action(
+    wrap(async (filePath, options) => {
+      const context = await loadProjectContext(process.cwd());
+      const wantsAll = Boolean(options.all);
+      const hasPath = Boolean(filePath);
+
+      if (wantsAll === hasPath) {
+        throw new Error('Gunakan salah satu: "wftp download <path>" atau "wftp download --all".');
+      }
+
+      printProjectContext(context);
+
+      if (wantsAll) {
+        printDownloadAll(context.repoRoot, context.localConfig.remoteRoot);
+
+        if (options.dryRun) {
+          process.stdout.write("Dry run selesai. Tidak ada koneksi FTP yang dilakukan.\n");
+          return;
+        }
+
+        await downloadAllFiles(context.repoRoot, context.localConfig, context.profile, {
+          verbose: Boolean(options.verbose)
+        });
+        process.stdout.write("Download selesai.\n");
+        return;
+      }
+
+      const target = buildSingleDownloadTarget(context.repoRoot, filePath, process.cwd());
+      printDownloadTarget(target);
+
+      if (options.dryRun) {
+        process.stdout.write("Dry run selesai. Tidak ada koneksi FTP yang dilakukan.\n");
+        return;
+      }
+
+      await downloadSingleFile(target, context.localConfig, context.profile, {
+        verbose: Boolean(options.verbose)
+      });
+      process.stdout.write("Download selesai.\n");
+    })
+  );
+
+program
+  .command("report")
+  .description("Simpan report perubahan working tree atau commit ke file txt.")
+  .option("--uncommit", "Simpan report file yang belum di-commit")
+  .option("--start <id>", "Commit awal untuk report range")
+  .option("--end <id>", "Commit akhir untuk report range")
+  .option("--line", "Sertakan line number untuk file edit atau delete")
+  .option("--name <name>", "Nama file report")
+  .option("--name-date", "Tambahkan suffix tanggal YYYYMMDD ke nama file custom")
+  .action(
+    wrap(async (options) => {
+      const repoRoot = await findGitRoot(process.cwd());
+      const result = await createReport(repoRoot, options);
+
+      if (result.kind === "noop") {
+        process.stdout.write(`${result.message}\n`);
+        return;
+      }
+
+      process.stdout.write(`Report tersimpan di ${result.filePath}\n`);
     })
   );
 

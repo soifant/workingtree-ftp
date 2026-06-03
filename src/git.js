@@ -3,23 +3,65 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-async function runGit(args, cwd) {
+function formatGitError(args, error) {
+  const detail = error.stderr?.trim() || error.message;
+  return `Gagal menjalankan git ${args.join(" ")}: ${detail}`;
+}
+
+async function execGit(args, cwd) {
+  return execFileAsync("git", args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024
+  });
+}
+
+export async function runGitCommand(args, cwd) {
   try {
-    const { stdout } = await execFileAsync("git", args, {
-      cwd,
-      encoding: "utf8",
-      maxBuffer: 10 * 1024 * 1024
-    });
+    const { stdout } = await execGit(args, cwd);
     return stdout;
   } catch (error) {
-    const detail = error.stderr?.trim() || error.message;
-    throw new Error(`Gagal menjalankan git ${args.join(" ")}: ${detail}`);
+    throw new Error(formatGitError(args, error));
+  }
+}
+
+export async function tryRunGitCommand(args, cwd) {
+  try {
+    const { stdout, stderr } = await execGit(args, cwd);
+    return {
+      ok: true,
+      stdout,
+      stderr,
+      code: 0
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: error.stdout || "",
+      stderr: error.stderr || "",
+      code: typeof error.code === "number" ? error.code : null,
+      error: new Error(formatGitError(args, error))
+    };
   }
 }
 
 export async function findGitRoot(startDir) {
-  const stdout = await runGit(["rev-parse", "--show-toplevel"], startDir);
+  const stdout = await runGitCommand(["rev-parse", "--show-toplevel"], startDir);
   return stdout.trim();
+}
+
+export async function getGitDir(startDir) {
+  const stdout = await runGitCommand(["rev-parse", "--absolute-git-dir"], startDir);
+  return stdout.trim();
+}
+
+export async function readHeadCommit(repoRoot) {
+  const result = await tryRunGitCommand(["rev-parse", "--verify", "HEAD"], repoRoot);
+  if (!result.ok) {
+    return null;
+  }
+
+  return result.stdout.trim();
 }
 
 export function parseGitStatus(raw) {
@@ -61,6 +103,6 @@ export function parseGitStatus(raw) {
 }
 
 export async function readWorkingTreeChanges(repoRoot) {
-  const stdout = await runGit(["status", "--porcelain=1", "-z", "-uall"], repoRoot);
+  const stdout = await runGitCommand(["status", "--porcelain=1", "-z", "-uall"], repoRoot);
   return parseGitStatus(stdout);
 }

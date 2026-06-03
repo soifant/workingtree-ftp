@@ -1,7 +1,7 @@
 {
   "name": "workingtree-ftp",
-  "version": "0.1.2",
-  "description": "Node.js CLI for uploading Git working tree changes to FTP or FTPS per project.",
+  "version": "0.4.0",
+  "description": "Node.js CLI for FTP or FTPS push, single-file transfer, and Git change reports per project.",
   "type": "module",
   "files": [
     "src",

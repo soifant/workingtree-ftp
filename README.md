@@ -1,4 +1,4 @@
-# workingtree-ftp-uploader
+# workingtree-ftp
 
 Node.js CLI for uploading Git working tree changes to an FTP or FTPS server without waiting for a commit. This tool is useful for legacy hosting workflows that still rely on FTP but want Git to decide which files changed.
 
@@ -25,7 +25,7 @@ The main command provided by this package is `wftp`.
 Install globally from the package:
 
 ```bash
-npm install -g workingtree-ftp-uploader
+npm install -g workingtree-ftp
 ```
 
 For development from this project folder:
@@ -87,7 +87,7 @@ The tool uses two configuration levels.
 Stored in the user's home directory:
 
 ```text
-~/.workingtree-ftp-uploader/profiles.json
+~/.workingtree-ftp/profiles.json
 ```
 
 Example:
@@ -304,6 +304,7 @@ If a profile uses `passwordEnv`, the upload fails when the referenced environmen
 The current version still reads older config locations as fallbacks:
 
 - Legacy local config: `.uncommit-ftp.json`
+- Previous global profiles: `~/.workingtree-ftp-uploader/profiles.json`
 - Legacy global profiles: `~/.uncommit-ftp-uploader/profiles.json`
 
 This is useful when migrating from the previous tool name.

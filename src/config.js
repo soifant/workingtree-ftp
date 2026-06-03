@@ -2,9 +2,10 @@ import os from "node:os";
 import path from "node:path";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 
-export const GLOBAL_DIR_NAME = ".workingtree-ftp-uploader";
+export const GLOBAL_DIR_NAME = ".workingtree-ftp";
 export const GLOBAL_PROFILES_FILE = "profiles.json";
 export const LOCAL_CONFIG_FILE = ".workingtree-ftp.json";
+export const PREVIOUS_GLOBAL_DIR_NAME = ".workingtree-ftp-uploader";
 export const LEGACY_GLOBAL_DIR_NAME = ".uncommit-ftp-uploader";
 export const LEGACY_LOCAL_CONFIG_FILE = ".uncommit-ftp.json";
 
@@ -16,8 +17,16 @@ export function getLegacyGlobalConfigDir() {
   return path.join(os.homedir(), LEGACY_GLOBAL_DIR_NAME);
 }
 
+export function getPreviousGlobalConfigDir() {
+  return path.join(os.homedir(), PREVIOUS_GLOBAL_DIR_NAME);
+}
+
 export function getGlobalProfilesPath() {
   return path.join(getGlobalConfigDir(), GLOBAL_PROFILES_FILE);
+}
+
+export function getPreviousGlobalProfilesPath() {
+  return path.join(getPreviousGlobalConfigDir(), GLOBAL_PROFILES_FILE);
 }
 
 export function getLegacyGlobalProfilesPath() {
@@ -105,7 +114,11 @@ function validateProfileDefinition(name, profile) {
 
 export async function readGlobalProfiles() {
   const filePath =
-    (await existingFilePath([getGlobalProfilesPath(), getLegacyGlobalProfilesPath()])) ||
+    (await existingFilePath([
+      getGlobalProfilesPath(),
+      getPreviousGlobalProfilesPath(),
+      getLegacyGlobalProfilesPath()
+    ])) ||
     getGlobalProfilesPath();
   const raw = await readJson(filePath, { profiles: {} });
   return normalizeProfilesShape(raw);
